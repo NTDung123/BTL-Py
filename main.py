@@ -34,7 +34,6 @@ DB_CONFIG = {
     'charset': 'utf8mb4'
 }
 
-
 def get_db_connection():
     try:
         connection = mysql.connector.connect(**DB_CONFIG)
@@ -306,7 +305,6 @@ async def logout():
     response.delete_cookie("role")
     return response
 
-
 @app.get("/profile", response_class=HTMLResponse)
 async def profile_page(request: Request):
     # 1. Kiểm tra xem người dùng đã đăng nhập chưa
@@ -343,7 +341,6 @@ async def profile_page(request: Request):
         "current_user": current_user,
         "user_details": user_details
     })
-
 
 # Hiển thị trang/form để chỉnh sửa thông tin
 @app.get("/edit_profile", response_class=HTMLResponse)
@@ -383,9 +380,9 @@ async def edit_profile_page(request: Request):
 # Xử lý dữ liệu khi người dùng nhấn "Lưu thay đổi"
 @app.post("/edit_profile")
 async def handle_edit_profile(
-        request: Request,
-        fullname: str = Form(...),  # Lấy "Họ và tên" từ form
-        phone: str = Form(...)  # Lấy "Số điện thoại" từ form
+    request: Request,
+    fullname: str = Form(...), # Lấy "Họ và tên" từ form
+    phone: str = Form(...)     # Lấy "Số điện thoại" từ form
 ):
     current_user = get_current_user(request)
     if not current_user:
@@ -402,18 +399,17 @@ async def handle_edit_profile(
             "UPDATE nguoidung SET ten = %s, soDienThoai = %s WHERE maND = %s",
             (fullname, phone, current_user['user_id'])
         )
-        db.commit()  # Lưu thay đổi
+        db.commit() # Lưu thay đổi
         cursor.close()
     except Error as e:
         print(f"Lỗi khi cập nhật profile: {e}")
-        db.rollback()  # Hoàn tác nếu có lỗi
+        db.rollback() # Hoàn tác nếu có lỗi
     finally:
         if db.is_connected():
             db.close()
 
     # Sau khi cập nhật xong, chuyển hướng người dùng về trang profile
     return RedirectResponse(url="/profile", status_code=302)
-
 
 @app.get("/cart", response_class=HTMLResponse)
 async def cart_page(request: Request):
@@ -526,9 +522,9 @@ async def add_to_cart(
 
 @app.post("/cart/update/{cart_item_id}")
 async def update_cart_item(
-        request: Request,
-        cart_item_id: int,
-        action: str = Form(...)  # Sẽ nhận giá trị "increase" hoặc "decrease"
+    request: Request,
+    cart_item_id: int,
+    action: str = Form(...) # Sẽ nhận giá trị "increase" hoặc "decrease"
 ):
     current_user = get_current_user(request)
     if not current_user:
@@ -543,11 +539,11 @@ async def update_cart_item(
 
         # Lấy số lượng hiện tại của item và số lượng tồn kho (stock)
         cursor.execute("""
-                       SELECT ctgh.soLuong, sp.soLuong as stock
-                       FROM chitietgiohang ctgh
-                                JOIN sanpham sp ON ctgh.maSP = sp.maSP
-                       WHERE ctgh.maCTGH = %s
-                       """, (cart_item_id,))
+            SELECT ctgh.soLuong, sp.soLuong as stock
+            FROM chitietgiohang ctgh
+            JOIN sanpham sp ON ctgh.maSP = sp.maSP
+            WHERE ctgh.maCTGH = %s
+        """, (cart_item_id,))
         item = cursor.fetchone()
 
         if not item:
@@ -583,8 +579,8 @@ async def update_cart_item(
 
 @app.post("/cart/remove/{cart_item_id}")
 async def remove_from_cart(
-        request: Request,
-        cart_item_id: int
+    request: Request,
+    cart_item_id: int
 ):
     current_user = get_current_user(request)
     if not current_user:
@@ -614,6 +610,199 @@ async def remove_from_cart(
     return RedirectResponse(url="/cart", status_code=302)
 
 
+@app.get("/checkout", response_class=HTMLResponse)
+async def checkout_page(request: Request):
+    current_user = get_current_user(request)
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=302)
+
+    cart_items = []
+    total = 0
+
+    db = get_db_connection()
+    if db:
+        try:
+            cursor = db.cursor(dictionary=True)
+
+            # Lấy giỏ hàng hiện tại
+            cursor.execute("""
+                           SELECT gh.maGH
+                           FROM giohang gh
+                                    JOIN khachhang kh ON gh.maKH = kh.maKH
+                                    JOIN nguoidung nd ON kh.maND = nd.maND
+                           WHERE nd.maND = %s
+                             AND gh.trangThai = 'Đang mua'
+                           """, (current_user['user_id'],))
+            cart = cursor.fetchone()
+
+            if cart:
+                cursor.execute("""
+                               SELECT ctgh.*, sp.ten, sp.gia, sp.hinhAnh, sp.soLuong as stock
+                               FROM chitietgiohang ctgh
+                                        JOIN sanpham sp ON ctgh.maSP = sp.maSP
+                               WHERE ctgh.maGH = %s
+                               """, (cart['maGH'],))
+                cart_items = cursor.fetchall()
+
+                for item in cart_items:
+                    item['subtotal'] = item['soLuong'] * item['gia']
+                    total += item['subtotal']
+
+            cursor.close()
+
+        except Error as e:
+            print(f"Error fetching cart for checkout: {e}")
+        finally:
+            if db.is_connected():
+                db.close()
+
+    if not cart_items:
+        return RedirectResponse(url="/cart", status_code=302)
+
+    return templates.TemplateResponse("checkout.html", {
+        "request": request,
+        "current_user": current_user,
+        "cart_items": cart_items,
+        "total": total
+    })
+
+
+@app.post("/checkout")
+async def process_checkout(
+        request: Request,
+        fullname: str = Form(...),
+        phone: str = Form(...),
+        address: str = Form(...),
+        payment_method: str = Form(...)
+):
+    current_user = get_current_user(request)
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=302)
+
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+
+    try:
+        cursor = db.cursor(dictionary=True)
+
+        # Lấy thông tin khách hàng và giỏ hàng
+        cursor.execute("""
+                       SELECT kh.maKH, gh.maGH
+                       FROM khachhang kh
+                                JOIN giohang gh ON kh.maKH = gh.maKH
+                       WHERE kh.maND = %s
+                         AND gh.trangThai = 'Đang mua'
+                       """, (current_user['user_id'],))
+        customer_cart = cursor.fetchone()
+
+        if not customer_cart:
+            raise HTTPException(status_code=404, detail="Cart not found")
+
+        # Lấy các sản phẩm trong giỏ hàng
+        cursor.execute("""
+                       SELECT ctgh.maSP, ctgh.soLuong, sp.gia, sp.ten, sp.soLuong as stock
+                       FROM chitietgiohang ctgh
+                                JOIN sanpham sp ON ctgh.maSP = sp.maSP
+                       WHERE ctgh.maGH = %s
+                       """, (customer_cart['maGH'],))
+        cart_items = cursor.fetchall()
+
+        if not cart_items:
+            raise HTTPException(status_code=400, detail="Cart is empty")
+
+        # Tính tổng tiền
+        total_amount = sum(item['soLuong'] * item['gia'] for item in cart_items)
+
+        # Kiểm tra tồn kho
+        for item in cart_items:
+            if item['soLuong'] > item['stock']:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Sản phẩm {item['ten']} không đủ số lượng tồn kho"
+                )
+
+        # Tạo đơn hàng
+        cursor.execute("""
+                       INSERT INTO donhang (maKH, hoTen, soDienThoai, diaChi, tongTien, phuongThucThanhToan, trangThai)
+                       VALUES (%s, %s, %s, %s, %s, %s, 'CHO_XAC_NHAN')
+                       """, (customer_cart['maKH'], fullname, phone, address, total_amount, payment_method))
+
+        order_id = cursor.lastrowid
+
+        # Thêm chi tiết đơn hàng
+        for item in cart_items:
+            subtotal = item['soLuong'] * item['gia']
+            cursor.execute("""
+                           INSERT INTO chitietdonhang (maDH, maSP, soLuong, donGia, thanhTien)
+                           VALUES (%s, %s, %s, %s, %s)
+                           """, (order_id, item['maSP'], item['soLuong'], item['gia'], subtotal))
+
+            # Cập nhật số lượng tồn kho
+            cursor.execute("""
+                           UPDATE sanpham
+                           SET soLuong = soLuong - %s,
+                               daBan   = daBan + %s
+                           WHERE maSP = %s
+                           """, (item['soLuong'], item['soLuong'], item['maSP']))
+
+        # Xóa giỏ hàng (đánh dấu là đã hoàn thành)
+        cursor.execute("UPDATE giohang SET trangThai = 'Đã hoàn thành' WHERE maGH = %s", (customer_cart['maGH'],))
+
+        # Tạo giỏ hàng mới cho khách hàng
+        cursor.execute("INSERT INTO giohang (maKH) VALUES (%s)", (customer_cart['maKH'],))
+
+        db.commit()
+        cursor.close()
+
+        # Chuyển hướng đến trang cảm ơn
+        return RedirectResponse(url=f"/order_success/{order_id}", status_code=302)
+
+    except Error as e:
+        db.rollback()
+        print(f"Error during checkout: {e}")
+        raise HTTPException(status_code=500, detail="Checkout failed")
+    finally:
+        if db.is_connected():
+            db.close()
+
+
+@app.get("/order_success/{order_id}", response_class=HTMLResponse)
+async def order_success(request: Request, order_id: int):
+    current_user = get_current_user(request)
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=302)
+
+    order_info = None
+    db = get_db_connection()
+    if db:
+        try:
+            cursor = db.cursor(dictionary=True)
+            cursor.execute("""
+                           SELECT dh.*, kh.maKH
+                           FROM donhang dh
+                                    JOIN khachhang kh ON dh.maKH = kh.maKH
+                                    JOIN nguoidung nd ON kh.maND = nd.maND
+                           WHERE dh.maDH = %s
+                             AND nd.maND = %s
+                           """, (order_id, current_user['user_id']))
+            order_info = cursor.fetchone()
+            cursor.close()
+        except Error as e:
+            print(f"Error fetching order: {e}")
+        finally:
+            if db.is_connected():
+                db.close()
+
+    if not order_info:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    return templates.TemplateResponse("order_success.html", {
+        "request": request,
+        "current_user": current_user,
+        "order": order_info
+    })
+
 def find_available_port(start_port=8000, max_port=8010):
     for port in range(start_port, max_port + 1):
         try:
@@ -623,7 +812,6 @@ def find_available_port(start_port=8000, max_port=8010):
         except OSError:
             continue
     return start_port
-
 
 if __name__ == "__main__":
     port = find_available_port()
