@@ -43,6 +43,16 @@
                             <p class="mb-0"><strong>Trạng thái:</strong> {{ order.trangThai }}</p>
                         </div>
 
+                        {% if qr_url %}
+                        <div class="my-4">
+                            <h5 class="mb-3">Quét QR để thanh toán</h5>
+                            <div class="d-flex justify-content-center">
+                                <img src="{{ qr_url }}" alt="QR Code thanh toán" class="img-fluid" style="max-width: 320px; border: 1px solid #eee; border-radius: 8px;"/>
+                            </div>
+                            <div class="small text-muted mt-2">Số tiền sẽ tự động điền theo đơn hàng. Nội dung: thanh_toan_don_hang_#{{ order.maDH }}</div>
+                        </div>
+                        {% endif %}
+
                         <div class="d-flex justify-content-center gap-3">
                             <a href="/products" class="btn btn-primary">
                                 <i class="fas fa-shopping-bag"></i> Tiếp tục mua sắm

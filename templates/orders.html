@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Đơn hàng của tôi - Clothing Shop{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">Đơn hàng của tôi</h2>
+
+{% if orders and orders|length > 0 %}
+<div class="table-responsive">
+  <table class="table table-striped align-middle">
+    <thead>
+      <tr>
+        <th>Mã đơn</th>
+        <th>Ngày tạo</th>
+        <th>Phương thức</th>
+        <th>Trạng thái</th>
+        <th class="text-end">Tổng tiền</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in orders %}
+      <tr>
+        <td>#{{ o.maDH }}</td>
+        <td>{{ o.ngayTao if o.ngayTao else '' }}</td>
+        <td>{{ o.phuongThucThanhToan }}</td>
+        <td>
+          {% if o.trangThai == 'CHO_XAC_NHAN' %}
+            <span class="badge bg-warning text-dark">Chờ xác nhận</span>
+          {% elif o.trangThai == 'DANG_GIAO' %}
+            <span class="badge bg-info text-dark">Đang giao</span>
+          {% elif o.trangThai == 'HOAN_THANH' %}
+            <span class="badge bg-success">Hoàn thành</span>
+          {% elif o.trangThai == 'DA_HUY' %}
+            <span class="badge bg-secondary">Đã hủy</span>
+          {% else %}
+            <span class="badge bg-light text-dark">{{ o.trangThai }}</span>
+          {% endif %}
+        </td>
+        <td class="text-end">{{ "{:,.0f} VNĐ".format(o.tongTien) }}</td>
+        <td class="text-end">
+          <form method="POST" action="/orders/delete/{{ o.maDH }}" onsubmit="return confirm('Xóa đơn hàng #{{ o.maDH }}? Chỉ áp dụng cho đơn chưa xác nhận.');" class="d-inline">
+            <button type="submit" class="btn btn-sm btn-outline-danger" {% if o.trangThai != 'CHO_XAC_NHAN' %}disabled{% endif %}>Xóa</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+  <div class="alert alert-info">Bạn chưa có đơn hàng nào.</div>
+{% endif %}
+{% endblock %}

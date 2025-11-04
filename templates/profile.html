@@ -60,9 +60,16 @@
             </li>
             
             <li class="list-group-item text-center bg-light" style="border-bottom-left-radius: 15px; border-bottom-right-radius: 15px;">
-                <a href="/edit_profile" class="btn btn-outline-primary mt-2 mb-2">
-                    <i class="fas fa-edit"></i> Chỉnh sửa thông tin
-                </a>
+                <div class="d-flex justify-content-center gap-2 flex-wrap mt-2 mb-2">
+                    <a href="/edit_profile" class="btn btn-outline-primary">
+                        <i class="fas fa-edit"></i> Chỉnh sửa thông tin
+                    </a>
+                    <form method="POST" action="/account/delete" onsubmit="return confirm('Bạn có chắc chắn muốn xóa tài khoản? Hành động này không thể hoàn tác.');">
+                        <button type="submit" class="btn btn-outline-danger">
+                            <i class="fas fa-user-times"></i> Xóa tài khoản
+                        </button>
+                    </form>
+                </div>
             </li>
         </ul>
     </div>

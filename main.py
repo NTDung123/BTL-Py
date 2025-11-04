@@ -12,6 +12,8 @@ import os
 import uvicorn
 from typing import Optional
 import socket
+import urllib.parse
+from datetime import datetime, timedelta
 
 app = FastAPI(title="Clothing Shop", debug=True)
 
@@ -29,7 +31,7 @@ templates = Jinja2Templates(directory="templates")
 DB_CONFIG = {
     'host': 'localhost',
     'user': 'root',
-    'password': 'Sonbui@2005',
+    'password': 'Ntdung123!',
     'database': 'clothing_shop',
     'charset': 'utf8mb4'
 }
@@ -51,6 +53,10 @@ def get_current_user(request: Request):
     if user_id and username and role:
         return {"user_id": user_id, "username": username, "role": role}
     return None
+
+
+def is_admin(user: Optional[dict]) -> bool:
+    return bool(user and str(user.get("role", "")).upper() == "ADMIN")
 
 
 # ===== ROUTES =====
@@ -88,45 +94,64 @@ async def home(request: Request):
 
 @app.get("/products", response_class=HTMLResponse)
 async def products(
-        request: Request,
-        category: Optional[str] = None,
-        brand: Optional[str] = None,
-        search: Optional[str] = None
+    request: Request,
+    category: Optional[str] = None,
+    brand: Optional[str] = None,
+    search: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 12
 ):
     current_user = get_current_user(request)
     products_list = []
     categories = []
     brands = []
 
+    # Sanitize pagination
+    allowed_sizes = {12, 20, 28}
+    if page_size not in allowed_sizes:
+        page_size = 12
+    if page < 1:
+        page = 1
+    offset = (page - 1) * page_size
+
     db = get_db_connection()
     if db:
         try:
             cursor = db.cursor(dictionary=True)
 
-            query = """
-                    SELECT sp.*, dm.ten as ten_danhmuc, th.ten as ten_thuonghieu
-                    FROM sanpham sp
-                             LEFT JOIN danhmuc dm ON sp.maDM = dm.maDM
-                             LEFT JOIN thuonghieu th ON sp.maTH = th.maTH
-                    WHERE 1 = 1 \
-                    """
-            params = []
+            base_from = (
+                " FROM sanpham sp "
+                " LEFT JOIN danhmuc dm ON sp.maDM = dm.maDM "
+                " LEFT JOIN thuonghieu th ON sp.maTH = th.maTH "
+                " WHERE 1 = 1 "
+            )
+            where_clauses = ""
+            params: list = []
 
             if category:
-                query += " AND dm.ten = %s"
+                where_clauses += " AND dm.ten = %s"
                 params.append(category)
 
             if brand:
-                query += " AND th.ten = %s"
+                where_clauses += " AND th.ten = %s"
                 params.append(brand)
 
             if search:
-                query += " AND sp.ten LIKE %s"
+                where_clauses += " AND sp.ten LIKE %s"
                 params.append(f"%{search}%")
 
-            query += " ORDER BY sp.maSP DESC"
+            # Count total
+            count_sql = "SELECT COUNT(*) AS total " + base_from + where_clauses
+            cursor.execute(count_sql, params)
+            total_row = cursor.fetchone() or {"total": 0}
+            total_count = int(total_row.get("total", 0))
 
-            cursor.execute(query, params)
+            # Paged query
+            query = (
+                " SELECT sp.*, dm.ten as ten_danhmuc, th.ten as ten_thuonghieu "
+                + base_from + where_clauses + " ORDER BY sp.maSP DESC LIMIT %s OFFSET %s"
+            )
+            cursor.execute(query, params + [page_size, offset])
             products_list = cursor.fetchall()
 
             cursor.execute("SELECT ten FROM danhmuc")
@@ -143,6 +168,9 @@ async def products(
             if db.is_connected():
                 db.close()
 
+    # Compute pagination meta
+    total_pages = (total_count + page_size - 1) // page_size if db else 1
+
     return templates.TemplateResponse("products.html", {
         "request": request,
         "current_user": current_user,
@@ -151,7 +179,11 @@ async def products(
         "brands": brands,
         "selected_category": category,
         "selected_brand": brand,
-        "search_query": search
+        "search_query": search,
+        "page": page,
+        "page_size": page_size,
+        "total": total_count,
+        "total_pages": total_pages
     })
 
 
@@ -200,6 +232,15 @@ async def login(
         username: str = Form(...),
         password: str = Form(...)
 ):
+
+    # Hardcoded admin access
+    if username == "admin" and password == "admin":
+        response = RedirectResponse(url="/", status_code=302)
+        response.set_cookie(key="user_id", value="-1")
+        response.set_cookie(key="username", value=username)
+        response.set_cookie(key="role", value="ADMIN")
+        return response
+
     db = get_db_connection()
     if not db:
         return templates.TemplateResponse("login.html", {
@@ -213,7 +254,25 @@ async def login(
         user = cursor.fetchone()
         cursor.close()
 
-        if user and user['matKhau'] == password:
+        # Check user lock status if table exists
+        locked = False
+        if user:
+            try:
+                cursor2 = db.cursor(dictionary=True)
+                cursor2.execute(
+                    "CREATE TABLE IF NOT EXISTS user_locks (maND INT PRIMARY KEY, locked_until DATETIME NULL)"
+                )
+                cursor2.execute("SELECT locked_until FROM user_locks WHERE maND = %s", (user['maND'],))
+                lock_row = cursor2.fetchone()
+                if lock_row and lock_row.get('locked_until'):
+                    # MySQL returns datetime already
+                    if lock_row['locked_until'] and datetime.now() < lock_row['locked_until']:
+                        locked = True
+                cursor2.close()
+            except Exception:
+                pass
+
+        if user and user['matKhau'] == password and not locked:
             response = RedirectResponse(url="/", status_code=302)
             response.set_cookie(key="user_id", value=str(user['maND']))
             response.set_cookie(key="username", value=username)
@@ -222,11 +281,82 @@ async def login(
         else:
             return templates.TemplateResponse("login.html", {
                 "request": request,
-                "error": "Tên đăng nhập hoặc mật khẩu không đúng"
+                "error": "Tên đăng nhập hoặc mật khẩu không đúng" if not locked else "Tài khoản đang bị khóa, vui lòng thử lại sau"
             })
     except Error as e:
         print(f"Error: {e}")
         return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": "Đăng nhập thất bại"
+        })
+    finally:
+        if db.is_connected():
+            db.close()
+@app.get("/admin/login", response_class=HTMLResponse)
+async def admin_login_page(request: Request):
+    current_user = get_current_user(request)
+    # If already admin, go to dashboard
+    if is_admin(current_user):
+        return RedirectResponse(url="/admin", status_code=302)
+    return templates.TemplateResponse("admin/login.html", {"request": request})
+
+
+@app.post("/admin/login")
+async def admin_login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...)
+):
+    # Hardcoded admin shortcut
+    if username == "admin" and password == "admin":
+        response = RedirectResponse(url="/admin", status_code=302)
+        response.set_cookie(key="user_id", value="-1")
+        response.set_cookie(key="username", value=username)
+        response.set_cookie(key="role", value="ADMIN")
+        return response
+
+    # Try DB admin
+    db = get_db_connection()
+    if not db:
+        return templates.TemplateResponse("admin/login.html", {
+            "request": request,
+            "error": "Database connection failed"
+        })
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM nguoidung WHERE tenDangNhap = %s AND vaiTro = 'ADMIN'", (username,))
+        user = cursor.fetchone()
+
+        # Check lock table
+        locked = False
+        if user:
+            try:
+                cursor2 = db.cursor(dictionary=True)
+                cursor2.execute(
+                    "CREATE TABLE IF NOT EXISTS user_locks (maND INT PRIMARY KEY, locked_until DATETIME NULL)"
+                )
+                cursor2.execute("SELECT locked_until FROM user_locks WHERE maND = %s", (user['maND'],))
+                lock_row = cursor2.fetchone()
+                if lock_row and lock_row.get('locked_until') and datetime.now() < lock_row['locked_until']:
+                    locked = True
+                cursor2.close()
+            except Exception:
+                pass
+
+        if user and user['matKhau'] == password and not locked:
+            response = RedirectResponse(url="/admin", status_code=302)
+            response.set_cookie(key="user_id", value=str(user['maND']))
+            response.set_cookie(key="username", value=username)
+            response.set_cookie(key="role", value="ADMIN")
+            return response
+        else:
+            return templates.TemplateResponse("admin/login.html", {
+                "request": request,
+                "error": "Sai thông tin đăng nhập hoặc tài khoản đang bị khóa"
+            })
+    except Error as e:
+        print(f"Error: {e}")
+        return templates.TemplateResponse("admin/login.html", {
             "request": request,
             "error": "Đăng nhập thất bại"
         })
@@ -410,6 +540,68 @@ async def handle_edit_profile(
 
     # Sau khi cập nhật xong, chuyển hướng người dùng về trang profile
     return RedirectResponse(url="/profile", status_code=302)
+
+
+@app.post("/account/delete")
+async def delete_account(request: Request):
+    current_user = get_current_user(request)
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=302)
+
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Lỗi kết nối database")
+
+    try:
+        cursor = db.cursor(dictionary=True)
+
+        user_id = int(current_user["user_id"]) if current_user.get("user_id") is not None else None
+
+        # Tìm khách hàng theo user
+        customer_id = None
+        cursor.execute("SELECT maKH FROM khachhang WHERE maND = %s", (user_id,))
+        row = cursor.fetchone()
+        if row:
+            customer_id = row["maKH"]
+
+        if customer_id is not None:
+            # Xóa chi tiết giỏ hàng -> giỏ hàng
+            cursor.execute("SELECT maGH FROM giohang WHERE maKH = %s", (customer_id,))
+            carts = cursor.fetchall()
+            for c in carts:
+                cursor.execute("DELETE FROM chitietgiohang WHERE maGH = %s", (c["maGH"],))
+            cursor.execute("DELETE FROM giohang WHERE maKH = %s", (customer_id,))
+
+            # Xóa chi tiết đơn hàng -> đơn hàng
+            cursor.execute("SELECT maDH FROM donhang WHERE maKH = %s", (customer_id,))
+            orders = cursor.fetchall()
+            for o in orders:
+                cursor.execute("DELETE FROM chitietdonhang WHERE maDH = %s", (o["maDH"],))
+            cursor.execute("DELETE FROM donhang WHERE maKH = %s", (customer_id,))
+
+            # Xóa bản ghi khách hàng
+            cursor.execute("DELETE FROM khachhang WHERE maKH = %s", (customer_id,))
+
+        # Cuối cùng xóa người dùng
+        cursor.execute("DELETE FROM nguoidung WHERE maND = %s", (user_id,))
+
+        db.commit()
+        cursor.close()
+
+        # Xóa cookie và chuyển hướng về trang chủ
+        response = RedirectResponse(url="/", status_code=302)
+        response.delete_cookie("user_id")
+        response.delete_cookie("username")
+        response.delete_cookie("role")
+        return response
+
+    except Error as e:
+        print(f"Error deleting account: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Không thể xóa tài khoản, vui lòng thử lại sau")
+    finally:
+        if db.is_connected():
+            db.close()
 
 @app.get("/cart", response_class=HTMLResponse)
 async def cart_page(request: Request):
@@ -797,11 +989,122 @@ async def order_success(request: Request, order_id: int):
     if not order_info:
         raise HTTPException(status_code=404, detail="Order not found")
 
+    # Build VietQR image URL with proper URL encoding (skip if COD)
+    qr_url = None
+    try:
+        method = str(order_info.get("phuongThucThanhToan", "")).strip().upper()
+        if method != "COD":
+            base_url = "https://img.vietqr.io/image/techcombank-0828251105-compact2.jpg"
+            params = {
+                "amount": int(order_info["tongTien"]) if order_info.get("tongTien") is not None else 0,
+                # Example: thanh_toan_don_hang_#123
+                "addInfo": f"thanh_toan_don_hang_#{order_id}",
+                "accountName": "Clothing Shop",
+            }
+            qr_url = f"{base_url}?{urllib.parse.urlencode(params)}"
+    except Exception:
+        qr_url = None
+
     return templates.TemplateResponse("order_success.html", {
         "request": request,
         "current_user": current_user,
-        "order": order_info
+        "order": order_info,
+        "qr_url": qr_url
     })
+
+
+@app.get("/orders", response_class=HTMLResponse)
+async def orders_page(request: Request):
+    current_user = get_current_user(request)
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=302)
+
+    orders = []
+    db = get_db_connection()
+    if db:
+        try:
+            cursor = db.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT dh.maDH, dh.tongTien, dh.trangThai, dh.phuongThucThanhToan, dh.ngayTao
+                FROM donhang dh
+                JOIN khachhang kh ON dh.maKH = kh.maKH
+                JOIN nguoidung nd ON kh.maND = nd.maND
+                WHERE nd.maND = %s
+                ORDER BY dh.maDH DESC
+                """,
+                (current_user["user_id"],)
+            )
+            orders = cursor.fetchall()
+            cursor.close()
+        except Error as e:
+            print(f"Error fetching orders: {e}")
+        finally:
+            if db.is_connected():
+                db.close()
+
+    return templates.TemplateResponse("orders.html", {
+        "request": request,
+        "current_user": current_user,
+        "orders": orders
+    })
+
+
+@app.post("/orders/delete/{order_id}")
+async def delete_order(request: Request, order_id: int):
+    current_user = get_current_user(request)
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=302)
+
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    try:
+        cursor = db.cursor(dictionary=True)
+        # Verify ownership and status
+        cursor.execute(
+            """
+            SELECT dh.*
+            FROM donhang dh
+            JOIN khachhang kh ON dh.maKH = kh.maKH
+            JOIN nguoidung nd ON kh.maND = nd.maND
+            WHERE dh.maDH = %s AND nd.maND = %s
+            """,
+            (order_id, current_user["user_id"]) 
+        )
+        order = cursor.fetchone()
+        if not order:
+            cursor.close()
+            return RedirectResponse(url="/orders", status_code=302)
+
+        # Only allow delete if waiting for confirmation
+        if str(order.get("trangThai", "")).upper() != "CHO_XAC_NHAN":
+            cursor.close()
+            return RedirectResponse(url="/orders", status_code=302)
+
+        # Restore stock for each item
+        cursor.execute("SELECT maSP, soLuong FROM chitietdonhang WHERE maDH = %s", (order_id,))
+        items = cursor.fetchall()
+        for it in items:
+            cursor.execute(
+                "UPDATE sanpham SET soLuong = soLuong + %s, daBan = GREATEST(daBan - %s, 0) WHERE maSP = %s",
+                (it["soLuong"], it["soLuong"], it["maSP"]) 
+            )
+
+        # Delete order details then order
+        cursor.execute("DELETE FROM chitietdonhang WHERE maDH = %s", (order_id,))
+        cursor.execute("DELETE FROM donhang WHERE maDH = %s", (order_id,))
+
+        db.commit()
+        cursor.close()
+    except Error as e:
+        db.rollback()
+        print(f"Error deleting order: {e}")
+    finally:
+        if db.is_connected():
+            db.close()
+
+    return RedirectResponse(url="/orders", status_code=302)
 
 def find_available_port(start_port=8000, max_port=8010):
     for port in range(start_port, max_port + 1):
@@ -822,3 +1125,441 @@ if __name__ == "__main__":
     print(f"   http://localhost:{port}/login - Đăng nhập")
     print(f"   http://localhost:{port}/register - Đăng ký")
     uvicorn.run(app, host="127.0.0.1", port=port, reload=True)
+
+
+# =================== ADMIN ROUTES ===================
+
+def ensure_user_locks_table():
+    db = get_db_connection()
+    if not db:
+        return
+    try:
+        cursor = db.cursor()
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS user_locks (maND INT PRIMARY KEY, locked_until DATETIME NULL)"
+        )
+        db.commit()
+        cursor.close()
+    except Exception:
+        pass
+    finally:
+        if db.is_connected():
+            db.close()
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard(request: Request):
+    current_user = get_current_user(request)
+    if not is_admin(current_user):
+        return RedirectResponse(url="/login", status_code=302)
+    return templates.TemplateResponse("admin/dashboard.html", {
+        "request": request,
+        "current_user": current_user,
+    })
+
+
+@app.get("/admin/accounts", response_class=HTMLResponse)
+async def admin_accounts(request: Request):
+    current_user = get_current_user(request)
+    if not is_admin(current_user):
+        return RedirectResponse(url="/login", status_code=302)
+
+    ensure_user_locks_table()
+
+    users = []
+    locks = {}
+    db = get_db_connection()
+    if db:
+        try:
+            cursor = db.cursor(dictionary=True)
+            cursor.execute("SELECT maND, tenDangNhap, ten, soDienThoai, vaiTro FROM nguoidung ORDER BY maND DESC")
+            users = cursor.fetchall()
+
+            cursor.execute("SELECT maND, locked_until FROM user_locks")
+            for row in cursor.fetchall():
+                locks[row['maND']] = row['locked_until']
+
+            cursor.close()
+        except Error as e:
+            print(f"Error fetching users: {e}")
+        finally:
+            if db.is_connected():
+                db.close()
+
+    return templates.TemplateResponse("admin/accounts.html", {
+        "request": request,
+        "current_user": current_user,
+        "users": users,
+        "locks": locks
+    })
+
+
+@app.post("/admin/users/lock")
+async def admin_lock_user(request: Request, user_id: int = Form(...), duration_minutes: int = Form(60)):
+    current_user = get_current_user(request)
+    if not is_admin(current_user):
+        return RedirectResponse(url="/login", status_code=302)
+
+    ensure_user_locks_table()
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    try:
+        cursor = db.cursor()
+        locked_until = datetime.now() + timedelta(minutes=duration_minutes)
+        cursor.execute(
+            "REPLACE INTO user_locks (maND, locked_until) VALUES (%s, %s)",
+            (user_id, locked_until)
+        )
+        db.commit()
+        cursor.close()
+    finally:
+        if db.is_connected():
+            db.close()
+    return RedirectResponse(url="/admin/accounts", status_code=302)
+
+
+@app.post("/admin/users/unlock")
+async def admin_unlock_user(request: Request, user_id: int = Form(...)):
+    current_user = get_current_user(request)
+    if not is_admin(current_user):
+        return RedirectResponse(url="/login", status_code=302)
+
+    ensure_user_locks_table()
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    try:
+        cursor = db.cursor()
+        cursor.execute("DELETE FROM user_locks WHERE maND = %s", (user_id,))
+        db.commit()
+        cursor.close()
+    finally:
+        if db.is_connected():
+            db.close()
+    return RedirectResponse(url="/admin/accounts", status_code=302)
+
+
+@app.post("/admin/users/delete")
+async def admin_delete_user(request: Request, user_id: int = Form(...)):
+    current_user = get_current_user(request)
+    if not is_admin(current_user):
+        return RedirectResponse(url="/login", status_code=302)
+
+    # Reuse deletion logic similar to /account/delete
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    try:
+        cursor = db.cursor(dictionary=True)
+
+        # Prevent deleting admin accounts by mistake (by role)
+        cursor.execute("SELECT vaiTro FROM nguoidung WHERE maND = %s", (user_id,))
+        r = cursor.fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="User not found")
+        if str(r.get('vaiTro', '')).upper() == 'ADMIN':
+            raise HTTPException(status_code=400, detail="Không thể xóa tài khoản ADMIN")
+
+        # Remove locks
+        try:
+            cursor2 = db.cursor()
+            cursor2.execute("DELETE FROM user_locks WHERE maND = %s", (user_id,))
+            cursor2.close()
+        except Exception:
+            pass
+
+        # Cascade delete similar to user self-delete
+        cursor.execute("SELECT maKH FROM khachhang WHERE maND = %s", (user_id,))
+        row = cursor.fetchone()
+        if row:
+            customer_id = row['maKH']
+            cursor.execute("SELECT maGH FROM giohang WHERE maKH = %s", (customer_id,))
+            carts = cursor.fetchall()
+            for c in carts:
+                cursor.execute("DELETE FROM chitietgiohang WHERE maGH = %s", (c['maGH'],))
+            cursor.execute("DELETE FROM giohang WHERE maKH = %s", (customer_id,))
+
+            cursor.execute("SELECT maDH FROM donhang WHERE maKH = %s", (customer_id,))
+            orders = cursor.fetchall()
+            for o in orders:
+                cursor.execute("DELETE FROM chitietdonhang WHERE maDH = %s", (o['maDH'],))
+            cursor.execute("DELETE FROM donhang WHERE maKH = %s", (customer_id,))
+
+            cursor.execute("DELETE FROM khachhang WHERE maKH = %s", (customer_id,))
+
+        cursor.execute("DELETE FROM nguoidung WHERE maND = %s", (user_id,))
+        db.commit()
+        cursor.close()
+    except Error as e:
+        db.rollback()
+        print(f"Error admin deleting user: {e}")
+        raise HTTPException(status_code=500, detail="Không thể xóa tài khoản")
+    finally:
+        if db.is_connected():
+            db.close()
+    return RedirectResponse(url="/admin/accounts", status_code=302)
+
+
+@app.get("/admin/orders", response_class=HTMLResponse)
+async def admin_orders(request: Request):
+    current_user = get_current_user(request)
+    if not is_admin(current_user):
+        return RedirectResponse(url="/login", status_code=302)
+
+    orders = []
+    db = get_db_connection()
+    if db:
+        try:
+            cursor = db.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT dh.*, nd.tenDangNhap, nd.ten AS tenNguoiDung
+                FROM donhang dh
+                JOIN khachhang kh ON dh.maKH = kh.maKH
+                JOIN nguoidung nd ON kh.maND = nd.maND
+                ORDER BY dh.maDH DESC
+                """
+            )
+            orders = cursor.fetchall()
+            cursor.close()
+        except Error as e:
+            print(f"Error fetching orders for admin: {e}")
+        finally:
+            if db.is_connected():
+                db.close()
+
+    return templates.TemplateResponse("admin/orders.html", {
+        "request": request,
+        "current_user": current_user,
+        "orders": orders
+    })
+
+
+@app.post("/admin/orders/delete")
+async def admin_delete_order(request: Request, order_id: int = Form(...)):
+    current_user = get_current_user(request)
+    if not is_admin(current_user):
+        return RedirectResponse(url="/login", status_code=302)
+
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    try:
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("SELECT trangThai FROM donhang WHERE maDH = %s", (order_id,))
+        order = cursor.fetchone()
+        if not order:
+            cursor.close()
+            return RedirectResponse(url="/admin/orders", status_code=302)
+
+        # Only delete and restock if awaiting confirmation
+        if str(order.get("trangThai", "")).upper() != "CHO_XAC_NHAN":
+            cursor.close()
+            return RedirectResponse(url="/admin/orders", status_code=302)
+
+        cursor.execute("SELECT maSP, soLuong FROM chitietdonhang WHERE maDH = %s", (order_id,))
+        items = cursor.fetchall()
+        for it in items:
+            cursor.execute(
+                "UPDATE sanpham SET soLuong = soLuong + %s, daBan = GREATEST(daBan - %s, 0) WHERE maSP = %s",
+                (it["soLuong"], it["soLuong"], it["maSP"]) 
+            )
+
+        cursor.execute("DELETE FROM chitietdonhang WHERE maDH = %s", (order_id,))
+        cursor.execute("DELETE FROM donhang WHERE maDH = %s", (order_id,))
+        db.commit()
+        cursor.close()
+    except Error as e:
+        db.rollback()
+        print(f"Error admin deleting order: {e}")
+    finally:
+        if db.is_connected():
+            db.close()
+
+    return RedirectResponse(url="/admin/orders", status_code=302)
+
+
+@app.get("/admin/revenue", response_class=HTMLResponse)
+async def admin_revenue(request: Request):
+    current_user = get_current_user(request)
+    if not is_admin(current_user):
+        return RedirectResponse(url="/login", status_code=302)
+
+    by_brand = []
+    by_category = []
+    db = get_db_connection()
+    if db:
+        try:
+            cursor = db.cursor(dictionary=True)
+            # Revenue by brand
+            cursor.execute(
+                """
+                SELECT th.ten AS thuongHieu, SUM(ct.thanhTien) AS doanhThu
+                FROM chitietdonhang ct
+                JOIN sanpham sp ON ct.maSP = sp.maSP
+                LEFT JOIN thuonghieu th ON sp.maTH = th.maTH
+                GROUP BY th.ten
+                ORDER BY doanhThu DESC
+                """
+            )
+            by_brand = cursor.fetchall()
+
+            # Revenue by category
+            cursor.execute(
+                """
+                SELECT dm.ten AS danhMuc, SUM(ct.thanhTien) AS doanhThu
+                FROM chitietdonhang ct
+                JOIN sanpham sp ON ct.maSP = sp.maSP
+                LEFT JOIN danhmuc dm ON sp.maDM = dm.maDM
+                GROUP BY dm.ten
+                ORDER BY doanhThu DESC
+                """
+            )
+            by_category = cursor.fetchall()
+            cursor.close()
+        except Error as e:
+            print(f"Error computing revenue: {e}")
+        finally:
+            if db.is_connected():
+                db.close()
+
+    return templates.TemplateResponse("admin/dashboard.html", {
+        "request": request,
+        "current_user": current_user,
+        "by_brand": by_brand,
+        "by_category": by_category
+    })
+
+
+@app.get("/admin/products", response_class=HTMLResponse)
+async def admin_products(request: Request, page: int = 1, page_size: int = 12):
+    current_user = get_current_user(request)
+    if not is_admin(current_user):
+        return RedirectResponse(url="/login", status_code=302)
+
+    products = []
+    categories = []
+    brands = []
+    total_count = 0
+    allowed_sizes = {12, 20, 28}
+    if page_size not in allowed_sizes:
+        page_size = 12
+    if page < 1:
+        page = 1
+    offset = (page - 1) * page_size
+    db = get_db_connection()
+    if db:
+        try:
+            cursor = db.cursor(dictionary=True)
+            cursor.execute("SELECT COUNT(*) AS total FROM sanpham")
+            total_row = cursor.fetchone() or {"total": 0}
+            total_count = int(total_row.get("total", 0))
+
+            cursor.execute(
+                "SELECT sp.*, dm.ten AS ten_danhmuc, th.ten AS ten_thuonghieu FROM sanpham sp "
+                "LEFT JOIN danhmuc dm ON sp.maDM = dm.maDM "
+                "LEFT JOIN thuonghieu th ON sp.maTH = th.maTH ORDER BY sp.maSP DESC LIMIT %s OFFSET %s",
+                (page_size, offset)
+            )
+            products = cursor.fetchall()
+
+            cursor.execute("SELECT maDM, ten FROM danhmuc ORDER BY ten")
+            categories = cursor.fetchall()
+
+            cursor.execute("SELECT maTH, ten FROM thuonghieu ORDER BY ten")
+            brands = cursor.fetchall()
+
+            cursor.close()
+        except Error as e:
+            print(f"Error fetching products for admin: {e}")
+        finally:
+            if db.is_connected():
+                db.close()
+
+    total_pages = (total_count + page_size - 1) // page_size if db else 1
+
+    return templates.TemplateResponse("admin/products.html", {
+        "request": request,
+        "current_user": current_user,
+        "products": products,
+        "categories": categories,
+        "brands": brands,
+        "page": page,
+        "page_size": page_size,
+        "total": total_count,
+        "total_pages": total_pages
+    })
+
+
+@app.post("/admin/products/add")
+async def admin_add_product(
+    request: Request,
+    ten: str = Form(...),
+    gia: int = Form(...),
+    soLuong: int = Form(0),
+    maDM: int = Form(...),
+    maTH: int = Form(...),
+    hinhAnh: str = Form("")
+):
+    current_user = get_current_user(request)
+    if not is_admin(current_user):
+        return RedirectResponse(url="/login", status_code=302)
+
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    try:
+        cursor = db.cursor()
+        cursor.execute(
+            """
+            INSERT INTO sanpham (ten, gia, soLuong, maDM, maTH, hinhAnh) VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (ten, gia, soLuong, maDM, maTH, hinhAnh)
+        )
+        db.commit()
+        cursor.close()
+    except Error as e:
+        db.rollback()
+        print(f"Error adding product: {e}")
+    finally:
+        if db.is_connected():
+            db.close()
+    return RedirectResponse(url="/admin/products", status_code=302)
+
+
+@app.post("/admin/products/update/{product_id}")
+async def admin_update_product(
+    request: Request,
+    product_id: int,
+    ten: str = Form(...),
+    gia: int = Form(...),
+    soLuong: int = Form(...),
+    maDM: int = Form(...),
+    maTH: int = Form(...),
+    hinhAnh: str = Form("")
+):
+    current_user = get_current_user(request)
+    if not is_admin(current_user):
+        return RedirectResponse(url="/login", status_code=302)
+
+    db = get_db_connection()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    try:
+        cursor = db.cursor()
+        cursor.execute(
+            """
+            UPDATE sanpham SET ten=%s, gia=%s, soLuong=%s, maDM=%s, maTH=%s, hinhAnh=%s WHERE maSP=%s
+            """,
+            (ten, gia, soLuong, maDM, maTH, hinhAnh, product_id)
+        )
+        db.commit()
+        cursor.close()
+    except Error as e:
+        db.rollback()
+        print(f"Error updating product: {e}")
+    finally:
+        if db.is_connected():
+            db.close()
+    return RedirectResponse(url="/admin/products", status_code=302)

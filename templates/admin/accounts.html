@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Quản lý tài khoản - Admin{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">Quản lý tài khoản</h2>
+<div class="table-responsive">
+  <table class="table table-striped align-middle">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Tên đăng nhập</th>
+        <th>Họ tên</th>
+        <th>SĐT</th>
+        <th>Vai trò</th>
+        <th>Khóa đến</th>
+        <th class="text-end">Thao tác</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td>{{ u.maND }}</td>
+        <td>{{ u.tenDangNhap }}</td>
+        <td>{{ u.ten }}</td>
+        <td>{{ u.soDienThoai }}</td>
+        <td>{{ u.vaiTro }}</td>
+        <td>{% if locks.get(u.maND) %}{{ locks.get(u.maND) }}{% endif %}</td>
+        <td class="text-end">
+          <form class="d-inline" method="POST" action="/admin/users/lock">
+            <input type="hidden" name="user_id" value="{{ u.maND }}" />
+            <div class="input-group input-group-sm" style="width: 220px; display:inline-flex;">
+              <input type="number" min="1" class="form-control" name="duration_minutes" value="60" />
+              <button class="btn btn-warning" type="submit">Khóa (phút)</button>
+            </div>
+          </form>
+          <form class="d-inline" method="POST" action="/admin/users/unlock">
+            <input type="hidden" name="user_id" value="{{ u.maND }}" />
+            <button class="btn btn-sm btn-success" type="submit">Mở khóa</button>
+          </form>
+          <form class="d-inline" method="POST" action="/admin/users/delete" onsubmit="return confirm('Xóa tài khoản này? Hành động không thể hoàn tác.');">
+            <input type="hidden" name="user_id" value="{{ u.maND }}" />
+            <button class="btn btn-sm btn-outline-danger" type="submit">Xóa</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

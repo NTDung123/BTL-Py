@@ -68,7 +68,21 @@
         <div class="col-lg-9">
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h1>Danh sách sản phẩm</h1>
-                <span class="badge bg-primary">{{ products|length }} sản phẩm</span>
+                <div class="d-flex align-items-center gap-2">
+                    <form method="get" class="d-flex align-items-center">
+                        <input type="hidden" name="search" value="{{ search_query or '' }}" />
+                        <input type="hidden" name="category" value="{{ selected_category or '' }}" />
+                        <input type="hidden" name="brand" value="{{ selected_brand or '' }}" />
+                        <input type="hidden" name="page" value="1" />
+                        <label class="me-2">Hiển thị</label>
+                        <select name="page_size" class="form-select form-select-sm" onchange="this.form.submit()" style="width: 100px;">
+                            <option value="12" {% if page_size == 12 %}selected{% endif %}>12</option>
+                            <option value="20" {% if page_size == 20 %}selected{% endif %}>20</option>
+                            <option value="28" {% if page_size == 28 %}selected{% endif %}>28</option>
+                        </select>
+                    </form>
+                    <span class="badge bg-primary">{{ total }} sản phẩm</span>
+                </div>
             </div>
 
             {% if products %}
@@ -103,6 +117,20 @@
                 </div>
                 {% endfor %}
             </div>
+            {% if total_pages and total_pages > 1 %}
+            <nav>
+                <ul class="pagination justify-content-center">
+                    <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+                        <a class="page-link" href="/products?search={{ search_query or '' }}&category={{ selected_category or '' }}&brand={{ selected_brand or '' }}&page={{ page - 1 }}&page_size={{ page_size }}">Trước</a>
+                    </li>
+                    <li class="page-item disabled"><span class="page-link">Trang {{ page }} / {{ total_pages }}</span></li>
+                    <li class="page-item {% if page >= total_pages %}disabled{% endif %}">
+                        <a class="page-link" href="/products?search={{ search_query or '' }}&category={{ selected_category or '' }}&brand={{ selected_brand or '' }}&page={{ page + 1 }}&page_size={{ page_size }}">Sau</a>
+                    </li>
+                </ul>
+            </nav>
+            {% endif %}
+
             {% else %}
             <div class="text-center py-5">
                 <div class="alert alert-warning">

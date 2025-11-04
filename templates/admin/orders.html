@@ -1,10 +1,42 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Title</title>
-</head>
-<body>
+{% extends "base.html" %}
 
-</body>
-</html>
+{% block title %}Quản lý đơn hàng - Admin{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">Tất cả đơn hàng</h2>
+
+<div class="table-responsive">
+    <table class="table table-striped align-middle">
+        <thead>
+            <tr>
+                <th>Mã đơn</th>
+                <th>Ngày tạo</th>
+                <th>Khách hàng</th>
+                <th>Phương thức</th>
+                <th>Trạng thái</th>
+                <th class="text-end">Tổng tiền</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for o in orders %}
+            <tr>
+                <td>#{{ o.maDH }}</td>
+                <td>{{ o.ngayTao if o.ngayTao else '' }}</td>
+                <td>{{ o.tenNguoiDung }} ({{ o.tenDangNhap }})</td>
+                <td>{{ o.phuongThucThanhToan }}</td>
+                <td>{{ o.trangThai }}</td>
+                <td class="text-end">{{ "{:,.0f} VNĐ".format(o.tongTien) }}</td>
+                        <td class="text-end">
+                            <form method="POST" action="/admin/orders/delete" onsubmit="return confirm('Xóa đơn hàng #{{ o.maDH }}? Chỉ áp dụng cho đơn chưa xác nhận.');" class="d-inline">
+                                <input type="hidden" name="order_id" value="{{ o.maDH }}" />
+                                <button type="submit" class="btn btn-sm btn-outline-danger" {% if o.trangThai != 'CHO_XAC_NHAN' %}disabled{% endif %}>Xóa</button>
+                            </form>
+                        </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}
