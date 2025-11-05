@@ -109,44 +109,6 @@ python main.py
 
 Lưu ý: Ứng dụng demo dùng mật khẩu dạng plain text và cookie đơn giản — KHÔNG dùng cho môi trường production.
 
-## Các route tiêu biểu
-
-Người dùng:
-- GET `/` — Trang chủ, sản phẩm nổi bật
-- GET `/products` — Danh sách sản phẩm, hỗ trợ `category`, `brand`, `search`, `page`, `page_size`
-- GET `/product/{product_id}` — Chi tiết sản phẩm
-- GET `/login` — Trang đăng nhập
-- POST `/login` — Xử lý đăng nhập
-- GET `/register` — Trang đăng ký
-- POST `/register` — Xử lý đăng ký
-- GET `/logout` — Đăng xuất
-- GET `/profile` — Hồ sơ người dùng
-- GET `/edit_profile` — Form sửa hồ sơ
-- POST `/edit_profile` — Lưu sửa hồ sơ
-- POST `/account/delete` — Xóa tài khoản người dùng
-- GET `/cart` — Giỏ hàng
-- POST `/cart/add/{product_id}` — Thêm vào giỏ (form: `quantity`, `size`, `color`)
-- POST `/cart/update/{cart_item_id}` — Cập nhật số lượng (form: `action` = `increase|decrease`)
-- POST `/cart/remove/{cart_item_id}` — Xóa khỏi giỏ
-- GET `/checkout` — Trang thanh toán
-- POST `/checkout` — Xử lý thanh toán, tạo đơn
-- GET `/order_success/{order_id}` — Trang cảm ơn + mã QR VietQR (không áp dụng cho COD)
-- GET `/orders` — Danh sách đơn hàng
-- POST `/orders/delete/{order_id}` — Hủy đơn chờ xác nhận
-
-Quản trị:
-- GET `/admin` — Bảng điều khiển
-- GET `/admin/accounts` — Quản lý tài khoản người dùng
-  - POST `/admin/users/lock` — Khóa tài khoản (theo phút)
-  - POST `/admin/users/unlock` — Mở khóa
-  - POST `/admin/users/delete` — Xóa tài khoản (không cho phép xóa ADMIN)
-- GET `/admin/orders` — Quản lý đơn hàng
-  - POST `/admin/orders/delete` — Xóa đơn chờ xác nhận (và hoàn kho)
-- GET `/admin/products` — Quản lý sản phẩm (phân trang)
-  - POST `/admin/products/add` — Thêm
-  - POST `/admin/products/update/{product_id}` — Cập nhật
-- GET `/admin/revenue` — Thống kê doanh thu theo thương hiệu/danh mục
-
 ## Kiểm thử nhanh endpoints
 
 File [`test_main.http`](./test_main.http) có thể dùng với các HTTP Client (ví dụ: plugin "HTTP Client" trong VS Code/IntelliJ).
@@ -157,29 +119,7 @@ GET http://127.0.0.1:8000/
 Accept: application/json
 ```
 
-## Lưu ý bảo mật và giới hạn
 
-- Mật khẩu người dùng đang lưu plaintext; không có hashing/salting
-- Chưa có xác thực/bảo vệ phiên nâng cao, chưa có CSRF protection
-- Chưa dùng ORM/migrations; thao tác SQL thuần
-- Thông số kết nối DB hard-code trong mã (chỉ nên dùng cho học tập/demo)
-
-Nếu triển khai thực tế, bạn nên:
-- Dùng biến môi trường hoặc file `.env` để quản lý thông số DB
-- Hash mật khẩu (ví dụ: `passlib[bcrypt]`)
-- Thêm xác thực/ủy quyền bài bản (session/JWT), CSRF, HTTPS
-- Dùng ORM (SQLAlchemy) và migration (Alembic)
-
-## Sự cố thường gặp
-
-- “Database connection failed”:
-  - Kiểm tra MySQL đang chạy và đúng thông số trong `DB_CONFIG`
-  - Đảm bảo DB `clothing_shop` đã được tạo và import dữ liệu
-  - Cấu hình user/password MySQL đúng, cấp quyền truy cập
-- Lỗi font/Unicode:
-  - Đảm bảo database và kết nối dùng `utf8mb4`
-
-## Phụ thuộc
 
 Xem [requirements.txt](./requirements.txt):
 - fastapi==0.104.1
@@ -189,8 +129,3 @@ Xem [requirements.txt](./requirements.txt):
 - python-multipart==0.0.6
 
 ## Giấy phép
-
-Chưa chỉ định giấy phép. Nếu bạn dùng lại mã nguồn, vui lòng ghi nhận nguồn và tuân thủ điều khoản của dự án gốc (nếu có).
-
----
-Chúc bạn học tốt và triển khai thành công!
