@@ -1158,9 +1158,50 @@ async def admin_dashboard(request: Request):
     current_user = get_current_user(request)
     if not is_admin(current_user):
         return RedirectResponse(url="/login", status_code=302)
+    # Compute revenue (by brand & category) to show by default on dashboard
+    by_brand = []
+    by_category = []
+    db = get_db_connection()
+    if db:
+        try:
+            cursor = db.cursor(dictionary=True)
+            # Revenue by brand
+            cursor.execute(
+                """
+                SELECT th.ten AS thuongHieu, SUM(ct.thanhTien) AS doanhThu
+                FROM chitietdonhang ct
+                JOIN sanpham sp ON ct.maSP = sp.maSP
+                LEFT JOIN thuonghieu th ON sp.maTH = th.maTH
+                GROUP BY th.ten
+                ORDER BY doanhThu DESC
+                """
+            )
+            by_brand = cursor.fetchall()
+
+            # Revenue by category
+            cursor.execute(
+                """
+                SELECT dm.ten AS danhMuc, SUM(ct.thanhTien) AS doanhThu
+                FROM chitietdonhang ct
+                JOIN sanpham sp ON ct.maSP = sp.maSP
+                LEFT JOIN danhmuc dm ON sp.maDM = dm.maDM
+                GROUP BY dm.ten
+                ORDER BY doanhThu DESC
+                """
+            )
+            by_category = cursor.fetchall()
+            cursor.close()
+        except Error as e:
+            print(f"Error computing revenue for dashboard: {e}")
+        finally:
+            if db.is_connected():
+                db.close()
+
     return templates.TemplateResponse("admin/dashboard.html", {
         "request": request,
         "current_user": current_user,
+        "by_brand": by_brand,
+        "by_category": by_category
     })
 
 
@@ -1388,54 +1429,9 @@ async def admin_delete_order(request: Request, order_id: int = Form(...)):
 
 @app.get("/admin/revenue", response_class=HTMLResponse)
 async def admin_revenue(request: Request):
-    current_user = get_current_user(request)
-    if not is_admin(current_user):
-        return RedirectResponse(url="/login", status_code=302)
-
-    by_brand = []
-    by_category = []
-    db = get_db_connection()
-    if db:
-        try:
-            cursor = db.cursor(dictionary=True)
-            # Revenue by brand
-            cursor.execute(
-                """
-                SELECT th.ten AS thuongHieu, SUM(ct.thanhTien) AS doanhThu
-                FROM chitietdonhang ct
-                JOIN sanpham sp ON ct.maSP = sp.maSP
-                LEFT JOIN thuonghieu th ON sp.maTH = th.maTH
-                GROUP BY th.ten
-                ORDER BY doanhThu DESC
-                """
-            )
-            by_brand = cursor.fetchall()
-
-            # Revenue by category
-            cursor.execute(
-                """
-                SELECT dm.ten AS danhMuc, SUM(ct.thanhTien) AS doanhThu
-                FROM chitietdonhang ct
-                JOIN sanpham sp ON ct.maSP = sp.maSP
-                LEFT JOIN danhmuc dm ON sp.maDM = dm.maDM
-                GROUP BY dm.ten
-                ORDER BY doanhThu DESC
-                """
-            )
-            by_category = cursor.fetchall()
-            cursor.close()
-        except Error as e:
-            print(f"Error computing revenue: {e}")
-        finally:
-            if db.is_connected():
-                db.close()
-
-    return templates.TemplateResponse("admin/dashboard.html", {
-        "request": request,
-        "current_user": current_user,
-        "by_brand": by_brand,
-        "by_category": by_category
-    })
+    # Route no longer needed; keep for backward-compatibility
+    # Redirect to /admin where revenue is displayed by default
+    return RedirectResponse(url="/admin", status_code=302)
 
 
 @app.get("/admin/products", response_class=HTMLResponse)
