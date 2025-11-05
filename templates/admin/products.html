@@ -36,6 +36,16 @@
                 <input name="soLuong" type="number" min="0" class="form-control" value="0" />
             </div>
             <div class="col-md-2">
+                <label class="form-label">Kích cỡ</label>
+                <input name="kichCo" class="form-control" placeholder="S, M, L" />
+                <div class="form-text">Ngăn cách bằng dấu phẩy</div>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Màu sắc</label>
+                <input name="mauSac" class="form-control" placeholder="Đỏ, Xanh, #000080, Navy Blue" />
+                <div class="form-text">Ngăn cách bằng dấu phẩy • Hỗ trợ tên tiếng Việt/Anh hoặc mã màu (#RRGGBB)</div>
+            </div>
+            <div class="col-md-2">
                 <label class="form-label">Danh mục</label>
                 <select name="maDM" class="form-select" required>
                     {% for c in categories %}
@@ -96,6 +106,12 @@
                         </div>
                         <div class="col-md-2">
                             <input class="form-control form-control-sm" type="number" name="soLuong" value="{{ p.soLuong }}" />
+                        </div>
+                        <div class="col-md-3">
+                            <input class="form-control form-control-sm" name="kichCo" value="{{ p.kichCo }}" placeholder="S, M, L" />
+                        </div>
+                        <div class="col-md-3">
+                            <input class="form-control form-control-sm" name="mauSac" value="{{ p.mauSac }}" placeholder="Đỏ, Xanh, Đen" />
                         </div>
                         <div class="col-md-2">
                             <select class="form-select form-select-sm" name="maDM">

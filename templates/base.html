@@ -10,7 +10,7 @@
     <link href="{{ url_for('static', path='css/style.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', path='css/ai.css') }}" rel="stylesheet">
     </head>
-<body>
+    <body class="d-flex flex-column min-vh-100">
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
         <div class="container">
             <a class="navbar-brand" href="/">Clothing Shop</a>
@@ -73,11 +73,11 @@
         </div>
     </nav>
 
-    <main class="container mt-4">
+    <main class="container mt-4 flex-grow-1">
         {% block content %}{% endblock %}
     </main>
 
-    <footer class="bg-dark text-light mt-5 py-4">
+    <footer class="bg-dark text-light py-4 mt-auto">
         <div class="container text-center">
             <p>&copy; 2025 Clothing Shop. All rights reserved.</p>
         </div>

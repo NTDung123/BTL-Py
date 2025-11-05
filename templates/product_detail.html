@@ -29,22 +29,42 @@
             {{ "{:,.0f}".format(product.gia) }} VNĐ
         </h2>
 
-        <table class="table mb-4" style="border-bottom: 1px solid #eee;">
-             <tbody>
-                <tr>
-                    <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Kích cỡ:</strong></td>
-                    <td style="padding: 8px 0; border-bottom: 1px solid #eee;">{{ product.kichCo or 'Không xác định' }}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Màu sắc:</strong></td>
-                    <td style="padding: 8px 0; border-bottom: 1px solid #eee;">{{ product.mauSac or 'Không xác định' }}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px 0;"><strong>Đã bán:</strong></td>
-                    <td style="padding: 8px 0;">{{ product.daBan or 0 }}</td>
-                </tr>
-            </tbody>
-        </table>
+                <style>
+                    .swatch { width: 28px; height: 28px; border-radius: 50%; border: 1px solid #ddd; cursor: pointer; display:inline-flex; align-items:center; justify-content:center; }
+                    .swatch.active { outline: 2px solid #0d6efd; }
+                    .size-btn { min-width: 44px; }
+                    .size-btn.active { border-color: #0d6efd; color:#0d6efd; }
+                </style>
+
+                <div class="mb-3">
+                    <div class="mb-1"><strong>Màu sắc:</strong></div>
+                    <div class="d-flex align-items-center gap-2 flex-wrap" id="color-options">
+                        {% set colors = (product.mauSac or '') %}
+                        {% for c in colors.split(',') if c.strip() %}
+                            <button type="button" class="swatch" data-color="{{ c.strip() }}" title="{{ c.strip() }}">
+                                <span class="swatch-dot" style="width:18px;height:18px;border-radius:50%;display:block;background-color: transparent;border:1px solid #ccc;"></span>
+                                <span class="visually-hidden">{{ c.strip() }}</span>
+                            </button>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <div class="mb-1"><strong>Size:</strong></div>
+                    <div class="d-flex align-items-center gap-2 flex-wrap" id="size-options">
+                        {% set sizes = (product.kichCo or '') %}
+                        {% for s in sizes.split(',') if s.strip() %}
+                            <button type="button" class="btn btn-outline-secondary btn-sm size-btn" data-size="{{ s.strip() }}">{{ s.strip() }}</button>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="mb-4 pb-2" style="border-bottom:1px solid #eee;">
+                    <div class="d-inline-flex align-items-center small">
+                        <strong>Đã bán:</strong>
+                        <span class="ms-2">{{ product.daBan or 0 }}</span>
+                    </div>
+                </div>
 
         {% if product.moTa %}
         <div class="mb-4">
@@ -56,7 +76,9 @@
         <div class="d-flex align-items-start gap-2 flex-nowrap">
             {% if current_user %}
                 {% if product.soLuong > 0 %}
-                <form action="/cart/add/{{ product.maSP }}" method="post" class="flex-grow-1">
+                <form action="/cart/add/{{ product.maSP }}" method="post" class="flex-grow-1" id="add-to-cart-form">
+                    <input type="hidden" name="color" id="chosen-color" />
+                    <input type="hidden" name="size" id="chosen-size" />
                     <div class="d-flex align-items-center mb-3">
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="qty-minus" disabled>
                             <i class="fas fa-minus"></i>
@@ -123,6 +145,123 @@
             syncButtons(v);
         });
         syncButtons(parseInt(input.value || '1'));
+
+                // Color/Size selection handling
+                const colorWrap = document.getElementById('color-options');
+                const sizeWrap = document.getElementById('size-options');
+                const chosenColor = document.getElementById('chosen-color');
+                const chosenSize = document.getElementById('chosen-size');
+                // Map extended color names to CSS colors/hex
+                const COLOR_MAP = {
+                    // basics
+                    'white':'#ffffff','black':'#000000','gray':'#808080','grey':'#808080','light gray':'#d3d3d3','light grey':'#d3d3d3','dark gray':'#555555','dark grey':'#555555',
+                    'silver':'#c0c0c0','gold':'#d4af37','beige':'#f5f5dc','ivory':'#fffff0','cream':'#fffdd0','off white':'#f8f8f8',
+                    // Vietnamese basics
+                    'trang':'#ffffff','trắng':'#ffffff','den':'#000000','đen':'#000000','xam':'#808080','xám':'#808080','xam nhat':'#d3d3d3','xám nhạt':'#d3d3d3','xam dam':'#555555','xám đậm':'#555555',
+                    'bac':'#c0c0c0','bạc':'#c0c0c0','vang':'#ffd700','vàng':'#ffd700','be':'#f5f5dc','kem':'#fffdd0',
+                    // reds/pinks
+                    'red':'#ff0000','maroon':'#800000','burgundy':'#800020','wine':'#722f37','crimson':'#dc143c','pink':'#ffc0cb','hot pink':'#ff69b4','magenta':'#ff00ff','coral':'#ff7f50','peach':'#ffcba4',
+                    // Vietnamese reds/pinks
+                    'do':'#ff0000','đỏ':'#ff0000','do do':'#8b0000','đỏ đô':'#8b0000','do ruou':'#722f37','đỏ rượu':'#722f37','hong':'#ffc0cb','hồng':'#ffc0cb',
+                    'do dam':'#8b0000','đỏ đậm':'#8b0000','do nhat':'#ffa07a','đỏ nhạt':'#ffa07a',
+                    // oranges/yellows
+                    'orange':'#ffa500','amber':'#ffbf00','mustard':'#ffdb58','yellow':'#ffff00','lemon':'#fff44f',
+                    // Vietnamese oranges/yellows
+                    'cam':'#ffa500','mù tạt':'#ffdb58','mutard':'#ffdb58','vàng chanh':'#fff44f','vang nhat':'#fff59d','vàng nhạt':'#fff59d',
+                    // greens
+                    'green':'#008000','dark green':'#006400','forest green':'#228b22','olive':'#808000','olive green':'#6b8e23','lime':'#00ff00','lime green':'#32cd32','teal':'#008080',
+                    'mint':'#98ff98','turquoise':'#40e0d0','aqua':'#00ffff','cyan':'#00ffff','sea green':'#2e8b57',
+                    // Vietnamese greens
+                    'xanh la':'#008000','xanh lá':'#008000','xanh luc':'#008000','xanh lục':'#008000','xanh reo':'#6b8e23','xanh rêu':'#6b8e23','xanh ngoc':'#40e0d0','xanh ngọc':'#40e0d0',
+                    'xanh mint':'#98ff98','xanh la cay':'#228b22','xanh lá cây':'#228b22','xanh la dam':'#006400','xanh lá đậm':'#006400','xanh la nhat':'#90ee90','xanh lá nhạt':'#90ee90',
+                    // blues
+                    'blue':'#0000ff','navy':'#000080','navy blue':'#000080','midnight blue':'#191970','dark blue':'#00008b','royal blue':'#4169e1','sky blue':'#87ceeb','light blue':'#add8e6','steel blue':'#4682b4',
+                    // Vietnamese blues
+                    'xanh duong':'#0000ff','xanh dương':'#0000ff','xanh lam':'#0000ff','xanh da troi':'#87ceeb','xanh da trời':'#87ceeb','xanh nhat':'#add8e6','xanh nhạt':'#add8e6',
+                    'xanh duong dam':'#00008b','xanh dương đậm':'#00008b','xanh duong nhat':'#add8e6','xanh dương nhạt':'#add8e6',
+                    'xanh navy':'#000080','xanh coban':'#0047ab','xanh cobalt':'#0047ab',
+                    // purples
+                    'purple':'#800080','indigo':'#4b0082','violet':'#8a2be2','lavender':'#e6e6fa','plum':'#dda0dd',
+                    // Vietnamese purples
+                    'tim':'#800080','tím':'#800080','hoa cai':'#e6e6fa','hoa cà':'#e6e6fa',
+                    // browns/neutrals
+                    'brown':'#a52a2a','chocolate':'#7b3f00','tan':'#d2b48c','khaki':'#c3b091','camel':'#c19a6b','sand':'#c2b280','coffee':'#6f4e37','charcoal':'#36454f'
+                };
+                function normalizeColorName(name){
+                    return (name||'').toString().trim().toLowerCase().replace(/\s+/g,' ').replace(/-/g,' ');
+                }
+                function isValidCssColor(val){
+                    const s = document.createElement('span').style;
+                    s.color = '';
+                    s.color = val;
+                    return s.color !== '';
+                }
+                function resolveColor(val){
+                    if(!val) return null;
+                    const raw = val.toString().trim();
+                    // direct hex or rgb(a)/hsl(a)
+                    if(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw) || /^(rgb|hsl)a?\(/i.test(raw)) return raw;
+                    const norm = normalizeColorName(raw);
+                    if(COLOR_MAP[norm]) return COLOR_MAP[norm];
+                    // try browser-known keyword (e.g., 'navy')
+                    if(isValidCssColor(norm)) return norm;
+                    return null;
+                }
+                // Paint swatches
+                if(colorWrap){
+                    colorWrap.querySelectorAll('.swatch').forEach(btn=>{
+                        const dot = btn.querySelector('.swatch-dot');
+                        const val = btn.getAttribute('data-color');
+                        const css = resolveColor(val);
+                        if(dot){
+                            if(css){
+                                dot.style.background = css;
+                                // add stronger border if very light
+                                try{
+                                    const test = document.createElement('span');
+                                    test.style.color = css;
+                                    // crude check: if equals 'white' or contains 'fff'
+                                    if(css.toLowerCase() === '#ffffff' || /#fff/i.test(css) || /white/i.test(css)){
+                                        dot.style.border = '1px solid #999';
+                                    }
+                                }catch(e){}
+                            } else {
+                                // fallback neutral
+                                dot.style.background = '#cccccc';
+                                dot.style.border = '1px dashed #666';
+                            }
+                        }
+                    });
+                }
+                if(colorWrap){
+                    colorWrap.addEventListener('click', (e)=>{
+                        const btn = e.target.closest('.swatch');
+                        if(!btn) return;
+                        [...colorWrap.querySelectorAll('.swatch')].forEach(b=>b.classList.remove('active'));
+                        btn.classList.add('active');
+                        chosenColor.value = btn.getAttribute('data-color');
+                    });
+                }
+                if(sizeWrap){
+                    sizeWrap.addEventListener('click', (e)=>{
+                        const btn = e.target.closest('.size-btn');
+                        if(!btn) return;
+                        [...sizeWrap.querySelectorAll('.size-btn')].forEach(b=>b.classList.remove('active'));
+                        btn.classList.add('active');
+                        chosenSize.value = btn.getAttribute('data-size');
+                    });
+                }
+
+                const form = document.getElementById('add-to-cart-form');
+                if(form){
+                    form.addEventListener('submit', (e)=>{
+                        // Require selection if options exist
+                        if((colorWrap && colorWrap.children.length>0 && !chosenColor.value) || (sizeWrap && sizeWrap.children.length>0 && !chosenSize.value)){
+                            e.preventDefault();
+                            alert('Vui lòng chọn màu sắc và size trước khi thêm vào giỏ hàng.');
+                        }
+                    });
+                }
     })();
     </script>
 {% endblock %}

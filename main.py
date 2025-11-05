@@ -658,9 +658,11 @@ async def cart_page(request: Request):
 
 @app.post("/cart/add/{product_id}")
 async def add_to_cart(
-        request: Request,
-        product_id: int,
-        quantity: int = Form(1)
+    request: Request,
+    product_id: int,
+    quantity: int = Form(1),
+    size: Optional[str] = Form(None),
+    color: Optional[str] = Form(None)
 ):
     current_user = get_current_user(request)
     if not current_user:
@@ -688,8 +690,12 @@ async def add_to_cart(
             else:
                 cart_id = cart[0]
 
-            cursor.execute("SELECT maCTGH, soLuong FROM chitietgiohang WHERE maGH = %s AND maSP = %s",
-                           (cart_id, product_id))
+            # Normalize variant inputs
+            size_val = (size or "").strip()
+            color_val = (color or "").strip()
+
+            cursor.execute("SELECT maCTGH, soLuong FROM chitietgiohang WHERE maGH = %s AND maSP = %s AND IFNULL(kichCo,'') = %s AND IFNULL(mauSac,'') = %s",
+                           (cart_id, product_id, size_val, color_val))
             existing_item = cursor.fetchone()
 
             if existing_item:
@@ -697,8 +703,8 @@ async def add_to_cart(
                 cursor.execute("UPDATE chitietgiohang SET soLuong = %s WHERE maCTGH = %s",
                                (new_quantity, existing_item[0]))
             else:
-                cursor.execute("INSERT INTO chitietgiohang (maGH, maSP, soLuong) VALUES (%s, %s, %s)",
-                               (cart_id, product_id, quantity))
+                cursor.execute("INSERT INTO chitietgiohang (maGH, maSP, soLuong, kichCo, mauSac) VALUES (%s, %s, %s, %s, %s)",
+                               (cart_id, product_id, quantity, size_val, color_val))
 
             db.commit()
             cursor.close()
@@ -893,7 +899,7 @@ async def process_checkout(
 
         # Lấy các sản phẩm trong giỏ hàng
         cursor.execute("""
-                       SELECT ctgh.maSP, ctgh.soLuong, sp.gia, sp.ten, sp.soLuong as stock
+                       SELECT ctgh.maSP, ctgh.soLuong, sp.gia, sp.ten, sp.soLuong as stock, ctgh.kichCo, ctgh.mauSac
                        FROM chitietgiohang ctgh
                                 JOIN sanpham sp ON ctgh.maSP = sp.maSP
                        WHERE ctgh.maGH = %s
@@ -926,9 +932,9 @@ async def process_checkout(
         for item in cart_items:
             subtotal = item['soLuong'] * item['gia']
             cursor.execute("""
-                           INSERT INTO chitietdonhang (maDH, maSP, soLuong, donGia, thanhTien)
-                           VALUES (%s, %s, %s, %s, %s)
-                           """, (order_id, item['maSP'], item['soLuong'], item['gia'], subtotal))
+                           INSERT INTO chitietdonhang (maDH, maSP, soLuong, donGia, thanhTien, kichCo, mauSac)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s)
+                           """, (order_id, item['maSP'], item['soLuong'], item['gia'], subtotal, item.get('kichCo'), item.get('mauSac')))
 
             # Cập nhật số lượng tồn kho
             cursor.execute("""
@@ -1500,7 +1506,9 @@ async def admin_add_product(
     soLuong: int = Form(0),
     maDM: int = Form(...),
     maTH: int = Form(...),
-    hinhAnh: str = Form("")
+    hinhAnh: str = Form(""),
+    kichCo: str = Form(""),
+    mauSac: str = Form("")
 ):
     current_user = get_current_user(request)
     if not is_admin(current_user):
@@ -1513,9 +1521,10 @@ async def admin_add_product(
         cursor = db.cursor()
         cursor.execute(
             """
-            INSERT INTO sanpham (ten, gia, soLuong, maDM, maTH, hinhAnh) VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO sanpham (ten, gia, soLuong, maDM, maTH, hinhAnh, kichCo, mauSac)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (ten, gia, soLuong, maDM, maTH, hinhAnh)
+            (ten, gia, soLuong, maDM, maTH, hinhAnh, kichCo, mauSac)
         )
         db.commit()
         cursor.close()
@@ -1537,7 +1546,9 @@ async def admin_update_product(
     soLuong: int = Form(...),
     maDM: int = Form(...),
     maTH: int = Form(...),
-    hinhAnh: str = Form("")
+    hinhAnh: str = Form(""),
+    kichCo: str = Form(""),
+    mauSac: str = Form("")
 ):
     current_user = get_current_user(request)
     if not is_admin(current_user):
@@ -1550,9 +1561,10 @@ async def admin_update_product(
         cursor = db.cursor()
         cursor.execute(
             """
-            UPDATE sanpham SET ten=%s, gia=%s, soLuong=%s, maDM=%s, maTH=%s, hinhAnh=%s WHERE maSP=%s
+            UPDATE sanpham SET ten=%s, gia=%s, soLuong=%s, maDM=%s, maTH=%s, hinhAnh=%s, kichCo=%s, mauSac=%s
+            WHERE maSP=%s
             """,
-            (ten, gia, soLuong, maDM, maTH, hinhAnh, product_id)
+            (ten, gia, soLuong, maDM, maTH, hinhAnh, kichCo, mauSac, product_id)
         )
         db.commit()
         cursor.close()
